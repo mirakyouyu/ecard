@@ -480,10 +480,11 @@ function checkBothReady() {
       if (result === 'p1') gs.score.p1++;
       else if (result === 'p2') gs.score.p2++;
 
-      // 5ラウンド消化後に勝ち数を比較して勝敗決定
+      // 引き分け以外は即ゲーム終了（勝敗確定）
       const noCards = gs.p1hand.length === 0 && gs.p2hand.length === 0;
+      const decided = result !== 'draw';
 
-      if (noCards) {
+      if (decided || noCards) {
         gs.winner = gs.score.p1 > gs.score.p2 ? 'p1'
                   : gs.score.p2 > gs.score.p1 ? 'p2' : 'draw';
         gs.status = 'gameover';
@@ -635,7 +636,7 @@ function renderReveal() {
     resEl.textContent = isDraw ? '引き分け' : myWin ? '勝利！' : '敗北…';
   }, 500);
 
-  document.getElementById('reveal-next-msg').textContent = '次のラウンドへ…';
+  document.getElementById('reveal-next-msg').textContent = isDraw ? '次のラウンドへ…' : '勝負決定！';
 }
 
 // ── ゲームオーバー画面 ──
