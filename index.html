@@ -1,0 +1,698 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>E カード</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+    :root {
+      --bg:      #0d0d0d;
+      --surface: #1a1a1a;
+      --border:  #2a2a2a;
+      --gold:    #c9a84c;
+      --red:     #c0392b;
+      --green:   #27ae60;
+      --blue:    #7799cc;
+      --text:    #f0f0f0;
+      --muted:   #666;
+    }
+    body {
+      font-family: -apple-system, 'Helvetica Neue', 'Hiragino Kaku Gothic ProN', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      justify-content: center;
+    }
+    #app {
+      width: 100%;
+      max-width: 480px;
+      min-height: 100vh;
+      position: relative;
+    }
+
+    /* ── Screens ── */
+    .screen { display: none; padding: 24px 20px; min-height: 100vh; flex-direction: column; }
+    .screen.active { display: flex; }
+
+    /* ── Typography ── */
+    .title-text {
+      font-size: 56px; font-weight: 900; text-align: center;
+      letter-spacing: 12px; color: var(--gold);
+      text-shadow: 0 0 40px rgba(201,168,76,0.35);
+    }
+    .subtitle { color: var(--muted); font-size: 13px; text-align: center; margin-top: 6px; letter-spacing: 2px; }
+
+    /* ── Buttons ── */
+    .btn {
+      display: block; width: 100%; padding: 16px;
+      border: none; border-radius: 6px;
+      font-size: 17px; font-weight: 700; cursor: pointer;
+      margin: 8px 0; transition: opacity 0.15s; text-align: center;
+      letter-spacing: 1px;
+    }
+    .btn:active { opacity: 0.65; }
+    .btn-gold  { background: var(--gold); color: #000; }
+    .btn-dark  { background: var(--surface); color: var(--text); border: 1px solid var(--border); }
+    .btn-sm    { padding: 10px 24px; font-size: 14px; width: auto; display: inline-block; }
+    .btn:disabled { opacity: 0.4; cursor: default; }
+
+    /* ── Input ── */
+    .code-input {
+      display: block; width: 100%; padding: 16px;
+      background: var(--surface); border: 2px solid var(--border); border-radius: 6px;
+      color: var(--text); font-size: 36px; text-align: center;
+      letter-spacing: 16px; margin: 8px 0; outline: none;
+    }
+    .code-input:focus { border-color: var(--gold); }
+
+    /* ── Room code display ── */
+    .room-code-display {
+      font-size: 60px; font-weight: 900; text-align: center;
+      letter-spacing: 18px; color: var(--gold);
+      padding: 24px; border: 2px solid var(--gold); border-radius: 10px;
+      margin: 16px 0; cursor: pointer;
+    }
+    .copy-hint { font-size: 12px; color: var(--muted); text-align: center; margin-top: -8px; }
+
+    /* ── Cards ── */
+    .card {
+      width: 74px; height: 110px; border-radius: 10px;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      cursor: pointer; transition: transform 0.2s, box-shadow 0.2s;
+      border: 2px solid transparent; user-select: none; flex-shrink: 0;
+    }
+    .card-symbol { font-size: 30px; line-height: 1; }
+    .card-name   { font-size: 11px; font-weight: 700; margin-top: 6px; letter-spacing: 1px; }
+
+    .card-emperor { background: linear-gradient(145deg, #3d2b00, #7a5c10); color: var(--gold); }
+    .card-slave   { background: linear-gradient(145deg, #1a1a30, #2a2a50); color: #9999cc; }
+    .card-citizen { background: linear-gradient(145deg, #1e1e1e, #2c2c2c); color: #aaa; }
+    .card-back    {
+      background: repeating-linear-gradient(135deg, #162218 0px, #162218 7px, #1d2f20 7px, #1d2f20 14px);
+      border-color: #2a4030;
+    }
+
+    .card.selected  { transform: translateY(-18px) !important; border-color: var(--gold) !important; box-shadow: 0 14px 32px rgba(201,168,76,0.45); }
+    .card.submitted { opacity: 0.45; cursor: default; pointer-events: none; }
+    .card.disabled  { cursor: default; pointer-events: none; }
+
+    .card-lg { width: 100px; height: 148px; }
+    .card-lg .card-symbol { font-size: 40px; }
+    .card-lg .card-name   { font-size: 14px; margin-top: 10px; }
+
+    .hand { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; padding: 8px 0; }
+
+    /* ── Score row ── */
+    .score-row {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 14px 16px; background: var(--surface); border-radius: 8px;
+    }
+    .score-player { text-align: center; min-width: 90px; }
+    .score-name   { font-size: 11px; color: var(--muted); }
+    .score-num    { font-size: 46px; font-weight: 900; line-height: 1.1; }
+    .score-vs     { font-size: 14px; color: var(--muted); text-align: center; line-height: 1.6; }
+    .num-gold     { color: var(--gold); }
+    .num-blue     { color: var(--blue); }
+
+    /* ── Role badges ── */
+    .role-badge { padding: 5px 12px; border-radius: 20px; font-size: 12px; font-weight: 700; }
+    .badge-emperor { background: rgba(201,168,76,0.15); color: var(--gold);  border: 1px solid rgba(201,168,76,0.4); }
+    .badge-slave   { background: rgba(100,100,200,0.15); color: var(--blue); border: 1px solid rgba(100,100,200,0.35); }
+
+    /* ── Status message ── */
+    .status-msg { text-align: center; color: var(--muted); font-size: 13px; padding: 10px 0; }
+
+    /* ── Game screen ── */
+    .game-header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding-bottom: 12px; border-bottom: 1px solid var(--border);
+    }
+    .game-title { font-size: 20px; font-weight: 900; color: var(--gold); letter-spacing: 5px; }
+    .opp-area   { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; }
+    .area-label { font-size: 12px; color: var(--muted); }
+    .divider    { height: 1px; background: var(--border); margin: 12px 0; }
+
+    /* ── Reveal screen ── */
+    .vs-row  { display: flex; align-items: flex-start; justify-content: center; gap: 20px; }
+    .vs-card { text-align: center; }
+    .vs-label { font-size: 12px; color: var(--muted); margin-bottom: 8px; }
+    .vs-sep  { font-size: 28px; color: var(--muted); font-weight: 900; margin-top: 44px; }
+    .result-label { font-size: 30px; font-weight: 900; text-align: center; }
+    .result-win  { color: var(--green); }
+    .result-lose { color: var(--red);   }
+    .result-draw { color: var(--muted); }
+
+    /* ── Rule table ── */
+    .rule-table { width: 100%; border-collapse: collapse; font-size: 13px; margin: 12px 0; }
+    .rule-table th, .rule-table td { padding: 8px 10px; border: 1px solid var(--border); text-align: center; }
+    .rule-table th { background: var(--surface); color: var(--muted); font-weight: 600; }
+    .rule-table .win-cell  { color: var(--green); font-weight: 700; }
+    .rule-table .lose-cell { color: var(--red);   font-weight: 700; }
+    .rule-table .draw-cell { color: var(--muted); }
+
+    /* ── Animations ── */
+    @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:0.45; } }
+    .pulse { animation: pulse 1.6s infinite; }
+    @keyframes fadeUp { from { opacity:0; transform:translateY(16px); } to { opacity:1; transform:translateY(0); } }
+    .fade-up { animation: fadeUp 0.4s ease; }
+    @keyframes popIn { 0% { transform:scale(0.5); opacity:0; } 80% { transform:scale(1.08); } 100% { transform:scale(1); opacity:1; } }
+    .pop-in { animation: popIn 0.5s ease forwards; }
+
+    /* ── Toast ── */
+    #toast {
+      position: fixed; bottom: 32px; left: 50%; transform: translateX(-50%) translateY(80px);
+      background: #333; color: #fff; padding: 10px 20px; border-radius: 24px;
+      font-size: 14px; transition: transform 0.3s; pointer-events: none; white-space: nowrap;
+      z-index: 999;
+    }
+    #toast.show { transform: translateX(-50%) translateY(0); }
+
+    /* ── Misc ── */
+    .center { text-align: center; }
+    .mt8  { margin-top: 8px; }
+    .mt16 { margin-top: 16px; }
+    .mt24 { margin-top: 24px; }
+    .mt32 { margin-top: 32px; }
+    .spacer { flex: 1; }
+  </style>
+</head>
+<body>
+<div id="app">
+
+  <!-- ========== HOME ========== -->
+  <div id="screen-home" class="screen active">
+    <div class="spacer"></div>
+    <div class="title-text">E カード</div>
+    <div class="subtitle">カイジ ― 限定Eカード</div>
+
+    <div style="height:48px;"></div>
+
+    <!-- ルール簡易表示 -->
+    <div style="margin-bottom:24px;">
+      <table class="rule-table">
+        <tr><th>皇帝側</th><th>vs</th><th>奴隷側</th><th>結果</th></tr>
+        <tr><td>👑 皇帝</td><td>vs</td><td>人 市民</td><td class="win-cell">皇帝側 勝ち</td></tr>
+        <tr><td>人 市民</td><td>vs</td><td>⛓️ 奴隷</td><td class="lose-cell">奴隷側 勝ち</td></tr>
+        <tr><td>👑 皇帝</td><td>vs</td><td>⛓️ 奴隷</td><td class="lose-cell">奴隷側 勝ち</td></tr>
+        <tr><td>人 市民</td><td>vs</td><td>人 市民</td><td class="draw-cell">引き分け</td></tr>
+      </table>
+      <div style="font-size:12px; color:var(--muted); text-align:center;">各5枚 ｜ 先取3勝</div>
+    </div>
+
+    <button class="btn btn-gold" onclick="createRoom()">部屋を作る（ホスト）</button>
+    <button class="btn btn-dark" id="join-toggle-btn" onclick="showJoinSection()">部屋に入る（ゲスト）</button>
+
+    <div id="join-section" style="display:none;">
+      <input class="code-input" id="join-input" type="tel" placeholder="0000" maxlength="4"
+             oninput="this.value=this.value.replace(/\D/g,'')">
+      <button class="btn btn-gold" onclick="joinRoom()">入る</button>
+      <button class="btn btn-dark" onclick="hideJoinSection()">キャンセル</button>
+    </div>
+
+    <div class="spacer"></div>
+    <div style="color:var(--muted); font-size:11px; text-align:center; padding:12px 0;">
+      ※ 下部の firebaseConfig を書き換えてから使用してください
+    </div>
+  </div>
+
+  <!-- ========== LOBBY ========== -->
+  <div id="screen-lobby" class="screen">
+    <div class="spacer"></div>
+    <div style="text-align:center;">
+      <div style="color:var(--muted); font-size:14px; margin-bottom:8px;">ルームコードを友達に教えてください</div>
+      <div class="room-code-display" id="lobby-code" onclick="copyCode()">----</div>
+      <div class="copy-hint">タップでコピー</div>
+    </div>
+    <div style="height:24px;"></div>
+    <div class="status-msg pulse">友達を待っています…</div>
+    <div class="spacer"></div>
+    <button class="btn btn-dark btn-sm" style="align-self:center;" onclick="goHome()">キャンセル</button>
+    <div style="height:24px;"></div>
+  </div>
+
+  <!-- ========== GAME ========== -->
+  <div id="screen-game" class="screen" style="padding:14px 16px;">
+    <!-- Header -->
+    <div class="game-header">
+      <div class="game-title">E カード</div>
+      <div id="game-role-badge"></div>
+    </div>
+    <div style="height:10px;"></div>
+
+    <!-- Score -->
+    <div class="score-row">
+      <div class="score-player">
+        <div class="score-name" id="score-p1-name">皇帝側</div>
+        <div class="score-num num-gold" id="score-p1-num">0</div>
+      </div>
+      <div class="score-vs">先取<br>3勝</div>
+      <div class="score-player">
+        <div class="score-name" id="score-p2-name">奴隷側</div>
+        <div class="score-num num-blue" id="score-p2-num">0</div>
+      </div>
+    </div>
+
+    <!-- Status -->
+    <div class="status-msg" id="game-status-msg">カードを選んでください</div>
+
+    <!-- Opponent hand -->
+    <div class="opp-area">
+      <div class="area-label">相手の手札</div>
+      <div class="hand" id="opp-hand"></div>
+      <div id="opp-submitted-msg" style="display:none; font-size:12px; color:#444;">カードを出しました ✓</div>
+    </div>
+
+    <div class="divider"></div>
+
+    <!-- My hand -->
+    <div>
+      <div class="area-label center" id="my-area-label">あなたの手札</div>
+      <div class="hand mt8" id="my-hand"></div>
+      <button class="btn btn-gold mt16" id="submit-btn" style="display:none;" onclick="submitCard()">
+        このカードを出す
+      </button>
+    </div>
+  </div>
+
+  <!-- ========== REVEAL ========== -->
+  <div id="screen-reveal" class="screen">
+    <div class="spacer"></div>
+    <div class="fade-up" style="display:flex; flex-direction:column; align-items:center; gap:28px;">
+      <div style="font-size:15px; color:var(--muted); letter-spacing:4px;">公　開</div>
+
+      <div class="vs-row">
+        <div class="vs-card">
+          <div class="vs-label" id="reveal-p1-name">皇帝側</div>
+          <div class="card card-lg" id="reveal-p1-card"></div>
+        </div>
+        <div class="vs-sep">VS</div>
+        <div class="vs-card">
+          <div class="vs-label" id="reveal-p2-name">奴隷側</div>
+          <div class="card card-lg" id="reveal-p2-card"></div>
+        </div>
+      </div>
+
+      <div class="result-label pop-in" id="reveal-result" style="opacity:0;"></div>
+      <div style="color:var(--muted); font-size:13px;" id="reveal-next-msg"></div>
+    </div>
+    <div class="spacer"></div>
+  </div>
+
+  <!-- ========== GAME OVER ========== -->
+  <div id="screen-gameover" class="screen">
+    <div class="spacer"></div>
+    <div class="fade-up" style="display:flex; flex-direction:column; align-items:center; gap:20px;">
+      <div style="font-size:88px;" id="go-emoji"></div>
+      <div style="font-size:38px; font-weight:900;" id="go-text"></div>
+      <div style="color:var(--muted); font-size:16px;" id="go-score"></div>
+    </div>
+    <div style="height:40px;"></div>
+    <button class="btn btn-gold" id="again-btn" onclick="playAgain()">もう一度</button>
+    <button class="btn btn-dark" onclick="goHome()">ホームへ</button>
+    <div class="spacer"></div>
+  </div>
+
+</div>
+
+<!-- Toast -->
+<div id="toast"></div>
+
+<!-- ============================================================
+     Firebase SDK (CDN)
+============================================================ -->
+<script type="module">
+import { initializeApp }        from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js';
+import { getDatabase, ref, set, get, onValue, update, remove }
+                                from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js';
+
+// ============================================================
+//  ★ ここを書き換えてください（Firebase コンソール → プロジェクト設定）
+// ============================================================
+const firebaseConfig = {
+  apiKey:            "YOUR_API_KEY",
+  authDomain:        "YOUR_PROJECT_ID.firebaseapp.com",
+  databaseURL:       "https://YOUR_PROJECT_ID-default-rtdb.firebaseio.com",
+  projectId:         "YOUR_PROJECT_ID",
+  storageBucket:     "YOUR_PROJECT_ID.appspot.com",
+  messagingSenderId: "YOUR_SENDER_ID",
+  appId:             "YOUR_APP_ID",
+};
+// ============================================================
+
+const fbApp = initializeApp(firebaseConfig);
+const db    = getDatabase(fbApp);
+
+// ── カード定義 ──
+const CARD = {
+  emperor: { name: '皇帝', symbol: '👑', cls: 'card-emperor' },
+  slave:   { name: '奴隷', symbol: '⛓️', cls: 'card-slave'   },
+  citizen: { name: '市民', symbol: '人',  cls: 'card-citizen' },
+};
+const EMPEROR_HAND = ['emperor','citizen','citizen','citizen','citizen'];
+const SLAVE_HAND   = ['slave',  'citizen','citizen','citizen','citizen'];
+const WIN_SCORE    = 3;
+
+// ── 状態変数 ──
+let myRole     = null;   // 'p1' | 'p2'
+let roomCode   = null;
+let unsub      = null;
+let selIdx     = null;   // 手札の選択インデックス
+let lastData   = null;
+let prevStatus = null;
+
+// ── ユーティリティ ──
+function toArr(v) {
+  if (!v) return [];
+  return Array.isArray(v) ? v : Object.values(v);
+}
+function roomRef()  { return ref(db, `rooms/${roomCode}`); }
+function showScreen(id) {
+  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+  document.getElementById('screen-' + id).classList.add('active');
+}
+function toast(msg) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.classList.add('show');
+  setTimeout(() => el.classList.remove('show'), 2000);
+}
+
+// ── 勝敗判定 ──
+function getResult(p1card, p2card) {
+  if (p1card === 'emperor' && p2card === 'slave')   return 'p2'; // 奴隷 > 皇帝
+  if (p1card === 'emperor' && p2card === 'citizen') return 'p1'; // 皇帝 > 市民
+  if (p1card === 'citizen' && p2card === 'slave')   return 'p2'; // 奴隷 > 市民
+  return 'draw';
+}
+
+// ============================================================
+//  ホーム
+// ============================================================
+window.showJoinSection = function() {
+  document.getElementById('join-section').style.display = 'block';
+  document.getElementById('join-toggle-btn').style.display = 'none';
+};
+window.hideJoinSection = function() {
+  document.getElementById('join-section').style.display = 'none';
+  document.getElementById('join-toggle-btn').style.display = 'block';
+};
+
+window.goHome = function() {
+  if (unsub)     { unsub(); unsub = null; }
+  if (roomCode && myRole === 'p1') {
+    // ホストが退出 → 部屋を削除
+    remove(ref(db, `rooms/${roomCode}`)).catch(() => {});
+  }
+  myRole = null; roomCode = null; selIdx = null; lastData = null; prevStatus = null;
+  showScreen('home');
+};
+
+window.copyCode = function() {
+  const code = document.getElementById('lobby-code').textContent;
+  if (navigator.clipboard) {
+    navigator.clipboard.writeText(code).then(() => toast('コピーしました！'));
+  } else {
+    toast(code);
+  }
+};
+
+// ============================================================
+//  部屋を作る（ホスト = P1）
+// ============================================================
+window.createRoom = async function() {
+  const code = String(Math.floor(1000 + Math.random() * 9000));
+  roomCode = code;
+  myRole   = 'p1';
+
+  await set(ref(db, `rooms/${code}`), {
+    status:        'waiting',
+    p1hand:        EMPEROR_HAND,
+    p2hand:        SLAVE_HAND,
+    p1card:        null,
+    p2card:        null,
+    score:         { p1: 0, p2: 0 },
+    revealHandled: false,
+    winner:        null,
+    created:       Date.now(),
+  });
+
+  document.getElementById('lobby-code').textContent = code;
+  showScreen('lobby');
+  listenRoom();
+};
+
+// ============================================================
+//  部屋に入る（ゲスト = P2）
+// ============================================================
+window.joinRoom = async function() {
+  const code = document.getElementById('join-input').value.trim();
+  if (code.length !== 4) { toast('4桁のコードを入力してください'); return; }
+
+  const snap = await get(ref(db, `rooms/${code}`));
+  if (!snap.exists())           { toast('部屋が見つかりません'); return; }
+  const d = snap.val();
+  if (d.status !== 'waiting')   { toast('このゲームはすでに始まっています'); return; }
+
+  roomCode = code;
+  myRole   = 'p2';
+
+  await update(ref(db, `rooms/${code}`), { status: 'playing' });
+  listenRoom();
+};
+
+// ============================================================
+//  リスナー
+// ============================================================
+function listenRoom() {
+  unsub = onValue(ref(db, `rooms/${roomCode}`), (snap) => {
+    const d = snap.val();
+    if (!d) { goHome(); return; }
+
+    // ラウンド開始時に選択をリセット
+    if (prevStatus === 'revealing' && d.status === 'playing') {
+      selIdx = null;
+    }
+    prevStatus = d.status;
+    lastData   = d;
+
+    // P1（ホスト）が状態遷移を管理
+    if (myRole === 'p1') hostLogic(d);
+
+    switch (d.status) {
+      case 'waiting':   /* lobby 画面のまま */ break;
+      case 'playing':   renderGame(d);    break;
+      case 'revealing': renderReveal(d);  break;
+      case 'gameover':  renderGameOver(d); break;
+    }
+  });
+}
+
+// ============================================================
+//  ホストロジック（P1 のみが実行）
+// ============================================================
+async function hostLogic(d) {
+  // 両者がカードを出したら reveal へ
+  if (d.status === 'playing' && d.p1card && d.p2card) {
+    await update(roomRef(), { status: 'revealing', revealHandled: false });
+    return;
+  }
+
+  // reveal → スコア更新 → 次ラウンド or ゲーム終了
+  if (d.status === 'revealing' && !d.revealHandled) {
+    await update(roomRef(), { revealHandled: true });
+
+    setTimeout(async () => {
+      const result = getResult(d.p1card, d.p2card);
+      const score  = { p1: d.score?.p1 ?? 0, p2: d.score?.p2 ?? 0 };
+      if (result === 'p1') score.p1++;
+      else if (result === 'p2') score.p2++;
+
+      const p1hand  = toArr(d.p1hand);
+      const p2hand  = toArr(d.p2hand);
+      const noCards = p1hand.length === 0 && p2hand.length === 0;
+      const gameOver = score.p1 >= WIN_SCORE || score.p2 >= WIN_SCORE || noCards;
+
+      if (gameOver) {
+        const winner = score.p1 > score.p2 ? 'p1'
+                     : score.p2 > score.p1 ? 'p2' : 'draw';
+        await update(roomRef(), { status: 'gameover', score, winner });
+      } else {
+        await update(roomRef(), {
+          status: 'playing', score,
+          p1card: null, p2card: null, revealHandled: false,
+        });
+      }
+    }, 3200);
+  }
+}
+
+// ============================================================
+//  描画：ゲーム画面
+// ============================================================
+function renderGame(d) {
+  showScreen('game');
+
+  const isP1   = myRole === 'p1';
+  const myHand = toArr(isP1 ? d.p1hand : d.p2hand);
+  const opHand = toArr(isP1 ? d.p2hand : d.p1hand);
+  const myCard = isP1 ? d.p1card : d.p2card;
+  const opCard = isP1 ? d.p2card : d.p1card;
+
+  // ロールバッジ
+  document.getElementById('game-role-badge').innerHTML =
+    `<span class="role-badge ${isP1 ? 'badge-emperor' : 'badge-slave'}">${isP1 ? '👑 皇帝側' : '⛓️ 奴隷側'}</span>`;
+
+  // スコア
+  document.getElementById('score-p1-name').textContent = isP1  ? '皇帝側（あなた）' : '皇帝側（相手）';
+  document.getElementById('score-p2-name').textContent = !isP1 ? '奴隷側（あなた）' : '奴隷側（相手）';
+  document.getElementById('score-p1-num').textContent  = d.score?.p1 ?? 0;
+  document.getElementById('score-p2-num').textContent  = d.score?.p2 ?? 0;
+
+  // ステータスメッセージ
+  const msg = document.getElementById('game-status-msg');
+  if (myCard && !opCard)  msg.textContent = '相手のカードを待っています…';
+  else if (!myCard)        msg.textContent = 'カードを選んでください';
+  else                     msg.textContent = '両者のカードが揃いました';
+
+  // 相手の手札（裏向き）
+  const oppEl = document.getElementById('opp-hand');
+  oppEl.innerHTML = '';
+  opHand.forEach(() => {
+    const el = document.createElement('div');
+    el.className = 'card card-back disabled';
+    if (opCard) { el.style.borderColor = '#555'; el.style.transform = 'translateY(-6px)'; }
+    el.innerHTML = `<div class="card-symbol" style="font-size:22px; color:#2d4a35;">🂠</div>`;
+    oppEl.appendChild(el);
+  });
+  document.getElementById('opp-submitted-msg').style.display = opCard ? 'block' : 'none';
+
+  // 自分の手札
+  const myEl = document.getElementById('my-hand');
+  myEl.innerHTML = '';
+  myHand.forEach((type, i) => {
+    const info = CARD[type];
+    const el   = document.createElement('div');
+    el.className = `card ${info.cls}`;
+    if (myCard) {
+      el.classList.add('submitted');
+    } else {
+      if (selIdx === i) el.classList.add('selected');
+      el.onclick = () => { selIdx = i; renderGame(lastData); };
+    }
+    el.innerHTML = `<div class="card-symbol">${info.symbol}</div><div class="card-name">${info.name}</div>`;
+    myEl.appendChild(el);
+  });
+
+  // 提出ボタン
+  document.getElementById('submit-btn').style.display =
+    (selIdx !== null && !myCard) ? 'block' : 'none';
+}
+
+// ============================================================
+//  カード提出
+// ============================================================
+window.submitCard = async function() {
+  if (selIdx === null || !lastData) return;
+  const isP1   = myRole === 'p1';
+  const myHand = toArr(isP1 ? lastData.p1hand : lastData.p2hand);
+  const myCard = isP1 ? lastData.p1card : lastData.p2card;
+  if (myCard) return;
+
+  const played  = myHand[selIdx];
+  const newHand = myHand.filter((_, i) => i !== selIdx);
+
+  const updates = {};
+  updates[`rooms/${roomCode}/${isP1 ? 'p1card' : 'p2card'}`] = played;
+  updates[`rooms/${roomCode}/${isP1 ? 'p1hand' : 'p2hand'}`] = newHand;
+  await update(ref(db, '/'), updates);
+};
+
+// ============================================================
+//  描画：公開画面
+// ============================================================
+function renderReveal(d) {
+  showScreen('reveal');
+  if (!d.p1card || !d.p2card) return;
+
+  const isP1   = myRole === 'p1';
+  const result = getResult(d.p1card, d.p2card);
+  const myWin  = (isP1 && result === 'p1') || (!isP1 && result === 'p2');
+  const isDraw = result === 'draw';
+
+  document.getElementById('reveal-p1-name').textContent = isP1  ? '皇帝側（あなた）' : '皇帝側（相手）';
+  document.getElementById('reveal-p2-name').textContent = !isP1 ? '奴隷側（あなた）' : '奴隷側（相手）';
+
+  // カード表示
+  applyCardEl('reveal-p1-card', d.p1card, true);
+  applyCardEl('reveal-p2-card', d.p2card, true);
+
+  // 結果テキスト（少し遅らせてアニメーション）
+  const resEl = document.getElementById('reveal-result');
+  resEl.style.opacity = '0';
+  setTimeout(() => {
+    resEl.style.opacity = '1';
+    resEl.className = 'result-label pop-in ' + (isDraw ? 'result-draw' : myWin ? 'result-win' : 'result-lose');
+    resEl.textContent = isDraw ? '引き分け' : myWin ? '勝利！' : '敗北…';
+  }, 500);
+
+  document.getElementById('reveal-next-msg').textContent = '次のラウンドへ…';
+}
+
+function applyCardEl(elId, type, large) {
+  const info = CARD[type];
+  const el   = document.getElementById(elId);
+  el.className = `card ${large ? 'card-lg ' : ''}${info.cls}`;
+  el.innerHTML = `<div class="card-symbol">${info.symbol}</div><div class="card-name">${info.name}</div>`;
+}
+
+// ============================================================
+//  描画：ゲーム終了
+// ============================================================
+function renderGameOver(d) {
+  showScreen('gameover');
+  const isP1   = myRole === 'p1';
+  const w      = d.winner;
+  const myWin  = (isP1 && w === 'p1') || (!isP1 && w === 'p2');
+  const isDraw = w === 'draw';
+
+  document.getElementById('go-emoji').textContent = isDraw ? '🤝' : myWin ? '🎉' : '💀';
+  const textEl = document.getElementById('go-text');
+  textEl.textContent = isDraw ? '引き分け' : myWin ? '勝利！' : '敗北…';
+  textEl.style.color = isDraw ? 'var(--muted)' : myWin ? 'var(--green)' : 'var(--red)';
+  document.getElementById('go-score').textContent =
+    `皇帝側 ${d.score?.p1 ?? 0} ー ${d.score?.p2 ?? 0} 奴隷側`;
+
+  // P2 はリセット不可
+  const againBtn = document.getElementById('again-btn');
+  if (myRole === 'p2') {
+    againBtn.textContent = 'ホストのリセットを待っています…';
+    againBtn.disabled = true;
+  } else {
+    againBtn.textContent = 'もう一度';
+    againBtn.disabled = false;
+  }
+}
+
+// ============================================================
+//  もう一度
+// ============================================================
+window.playAgain = async function() {
+  if (myRole !== 'p1') return;
+  selIdx = null;
+  await update(roomRef(), {
+    status:        'playing',
+    p1hand:        EMPEROR_HAND,
+    p2hand:        SLAVE_HAND,
+    p1card:        null,
+    p2card:        null,
+    score:         { p1: 0, p2: 0 },
+    revealHandled: false,
+    winner:        null,
+  });
+};
+
+</script>
+</body>
+</html>
