@@ -160,12 +160,15 @@
     <table class="rule-table">
       <tr><th>皇帝側</th><th>vs</th><th>奴隷側</th><th>結果</th></tr>
       <tr><td>👑 皇帝</td><td>vs</td><td>人 市民</td><td class="win-cell">皇帝側 勝ち</td></tr>
-      <tr><td>人 市民</td><td>vs</td><td>⛓️ 奴隷</td><td class="lose-cell">奴隷側 勝ち</td></tr>
+      <tr><td>人 市民</td><td>vs</td><td>⛓️ 奴隷</td><td class="win-cell">皇帝側 勝ち</td></tr>
       <tr><td>👑 皇帝</td><td>vs</td><td>⛓️ 奴隷</td><td class="lose-cell">奴隷側 勝ち</td></tr>
       <tr><td>人 市民</td><td>vs</td><td>人 市民</td><td class="draw-cell">引き分け</td></tr>
     </table>
+    <div style="font-size:12px; color:var(--muted); text-align:center; margin-bottom:4px;">
+      皇帝 &gt; 市民 &gt; 奴隷 &gt; 皇帝（三すくみ）
+    </div>
     <div style="font-size:12px; color:var(--muted); text-align:center; margin-bottom:24px;">
-      各5枚 ｜ 先取3勝
+      各5枚 ｜ 5ラウンド制・勝ち数の多い方が勝ち
     </div>
     <button class="btn btn-gold" onclick="createRoom()">部屋を作る（ホスト）</button>
     <button class="btn btn-dark" id="join-toggle-btn" onclick="showJoinSection()">部屋に入る（ゲスト）</button>
@@ -205,7 +208,7 @@
         <div class="score-name" id="score-p1-name">皇帝側</div>
         <div class="score-num num-gold" id="score-p1-num">0</div>
       </div>
-      <div class="score-vs">先取<br>3勝</div>
+      <div class="score-vs" id="round-counter">1/<br>5R</div>
       <div class="score-player">
         <div class="score-name" id="score-p2-name">奴隷側</div>
         <div class="score-num num-blue" id="score-p2-num">0</div>
@@ -273,7 +276,7 @@
 // ══════════════════════════════════════════════
 const EMPEROR_HAND = ['emperor','citizen','citizen','citizen','citizen'];
 const SLAVE_HAND   = ['slave',  'citizen','citizen','citizen','citizen'];
-const WIN_SCORE    = 3;
+const TOTAL_ROUNDS = 5;
 const CARD = {
   emperor: { name: '皇帝', symbol: '👑', cls: 'card-emperor' },
   slave:   { name: '奴隷', symbol: '⛓️', cls: 'card-slave'   },
@@ -299,6 +302,7 @@ function freshState() {
     p1card:  null,
     p2card:  null,
     score:   { p1: 0, p2: 0 },
+    round:   1,
     winner:  null,
   };
 }
@@ -317,11 +321,13 @@ function toast(msg) {
   clearTimeout(el._t);
   el._t = setTimeout(() => el.classList.remove('show'), 2200);
 }
+// 三すくみ: 皇帝 > 市民 > 奴隷 > 皇帝
+// p1 = 皇帝側, p2 = 奴隷側
 function getResult(p1c, p2c) {
-  if (p1c === 'emperor' && p2c === 'slave')   return 'p2';
-  if (p1c === 'emperor' && p2c === 'citizen') return 'p1';
-  if (p1c === 'citizen' && p2c === 'slave')   return 'p2';
-  return 'draw';
+  if (p1c === 'emperor' && p2c === 'citizen') return 'p1'; // 皇帝 > 市民
+  if (p1c === 'citizen' && p2c === 'slave')   return 'p1'; // 市民 > 奴隷
+  if (p1c === 'emperor' && p2c === 'slave')   return 'p2'; // 奴隷 > 皇帝
+  return 'draw'; // 市民 vs 市民
 }
 function send(msg) {
   if (conn && conn.open) conn.send(msg);
@@ -474,16 +480,17 @@ function checkBothReady() {
       if (result === 'p1') gs.score.p1++;
       else if (result === 'p2') gs.score.p2++;
 
+      // 5ラウンド消化後に勝ち数を比較して勝敗決定
       const noCards = gs.p1hand.length === 0 && gs.p2hand.length === 0;
-      const gameOver = gs.score.p1 >= WIN_SCORE || gs.score.p2 >= WIN_SCORE || noCards;
 
-      if (gameOver) {
+      if (noCards) {
         gs.winner = gs.score.p1 > gs.score.p2 ? 'p1'
                   : gs.score.p2 > gs.score.p1 ? 'p2' : 'draw';
         gs.status = 'gameover';
       } else {
         gs.p1card = null;
         gs.p2card = null;
+        gs.round  = (gs.round || 1) + 1;
         gs.status = 'playing';
       }
       selIdx = null;
@@ -560,6 +567,8 @@ function renderGame() {
   document.getElementById('score-p2-name').textContent = !isP1 ? '奴隷側（あなた）' : '奴隷側（相手）';
   document.getElementById('score-p1-num').textContent  = gs.score.p1;
   document.getElementById('score-p2-num').textContent  = gs.score.p2;
+  const round = gs.round || 1;
+  document.getElementById('round-counter').innerHTML   = `${round}/<br>${TOTAL_ROUNDS}R`;
 
   const msg = document.getElementById('game-status-msg');
   if (myCard && !opCard)  msg.textContent = '相手のカードを待っています…';
