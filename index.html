@@ -447,14 +447,17 @@ function createRoom() {
 
   peer.on('connection', (c) => {
     conn = c;
-    conn.on('open', () => {
-      // P2 が繋がったのでゲーム開始
-      gs = freshState();
-      selIdx = null;
-      broadcastState();
-      render();
+    conn.on('data', (msg) => {
+      if (msg.type === 'hello') {
+        // P2 の準備完了 → ゲーム開始
+        gs = freshState();
+        selIdx = null;
+        broadcastState();
+        render();
+        return;
+      }
+      onP2Message(msg);
     });
-    conn.on('data', (msg) => onP2Message(msg));
     conn.on('close', () => toast('相手が切断しました'));
   });
 
@@ -487,6 +490,7 @@ function joinRoom() {
       document.getElementById('lobby-code').textContent = code;
       document.getElementById('lobby-status').textContent = '接続しました！';
       showScreen('lobby');
+      conn.send({ type: 'hello' }); // P1 に準備完了を通知
     });
     conn.on('data',  (msg) => onP1Message(msg));
     conn.on('close', () => toast('ホストが切断しました'));
