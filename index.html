@@ -108,6 +108,26 @@
       padding-bottom: 12px; border-bottom: 1px solid var(--border);
     }
     .game-title { font-size: 20px; font-weight: 900; color: var(--gold); letter-spacing: 5px; }
+    /* ── Role select ── */
+    .role-cards { display: flex; gap: 16px; justify-content: center; }
+    .role-card {
+      width: 130px; padding: 24px 12px;
+      border-radius: 12px; border: 2px solid var(--border);
+      background: var(--surface);
+      display: flex; flex-direction: column; align-items: center; gap: 10px;
+      cursor: pointer; transition: border-color 0.2s, box-shadow 0.2s, transform 0.15s;
+      user-select: none;
+    }
+    .role-card:active { transform: scale(0.95); }
+    .role-card.chosen {
+      border-color: var(--gold);
+      box-shadow: 0 0 24px rgba(201,168,76,0.3);
+    }
+    .role-card.disabled-card { opacity: 0.4; cursor: default; pointer-events: none; }
+    .role-card-icon  { font-size: 44px; }
+    .role-card-title { font-size: 16px; font-weight: 700; }
+    .role-card-hand  { font-size: 11px; color: var(--muted); text-align: center; line-height: 1.6; }
+
     .opp-area   { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; padding: 12px 0; }
     .area-label { font-size: 11px; color: var(--muted); }
     .divider    { height: 1px; background: var(--border); margin: 8px 0; }
@@ -195,6 +215,33 @@
     <div class="spacer"></div>
     <button class="btn btn-dark btn-sm" style="align-self:center;" onclick="goHome()">キャンセル</button>
     <div style="height:24px;"></div>
+  </div>
+
+  <!-- ── ROLE SELECT ── -->
+  <div id="screen-roleselect" class="screen">
+    <div class="spacer"></div>
+    <div style="display:flex; flex-direction:column; align-items:center; gap:24px;" class="fade-up">
+      <div style="font-size:15px; color:var(--muted); letter-spacing:2px;">役を選んでください</div>
+
+      <div class="role-cards">
+        <div class="role-card" id="role-card-emperor" onclick="pickRole('emperor')">
+          <div class="role-card-icon">👑</div>
+          <div class="role-card-title" style="color:var(--gold);">皇帝側</div>
+          <div class="role-card-hand">皇帝 × 1<br>市民 × 4</div>
+        </div>
+        <div class="role-card" id="role-card-slave" onclick="pickRole('slave')">
+          <div class="role-card-icon">⛓️</div>
+          <div class="role-card-title" style="color:var(--blue);">奴隷側</div>
+          <div class="role-card-hand">奴隷 × 1<br>市民 × 4</div>
+        </div>
+      </div>
+
+      <div id="role-status-msg" class="status-msg"></div>
+      <button class="btn btn-gold" id="role-confirm-btn" style="display:none; width:200px;" onclick="confirmRoles()">
+        決定してゲームスタート
+      </button>
+    </div>
+    <div class="spacer"></div>
   </div>
 
   <!-- ── GAME ── -->
@@ -300,15 +347,28 @@ let gs = null;
 
 function freshState() {
   return {
-    status:  'playing',
-    p1hand:  [...EMPEROR_HAND],
-    p2hand:  [...SLAVE_HAND],
+    status:  'roleSelect',
+    p1side:  'emperor',   // P1が選んだサイド（'emperor' | 'slave'）
+    p1hand:  [],
+    p2hand:  [],
     p1card:  null,
     p2card:  null,
     score:   { p1: 0, p2: 0 },
     round:   1,
     winner:  null,
   };
+}
+
+// P1のサイドに応じた手札を設定してゲーム開始
+function startGameWithRoles() {
+  gs.p1hand = gs.p1side === 'emperor' ? [...EMPEROR_HAND] : [...SLAVE_HAND];
+  gs.p2hand = gs.p1side === 'emperor' ? [...SLAVE_HAND]   : [...EMPEROR_HAND];
+  gs.status = 'playing';
+  gs.score  = { p1: 0, p2: 0 };
+  gs.round  = 1;
+  gs.winner = null;
+  gs.p1card = null;
+  gs.p2card = null;
 }
 
 // ══════════════════════════════════════════════
@@ -326,12 +386,18 @@ function toast(msg) {
   el._t = setTimeout(() => el.classList.remove('show'), 2200);
 }
 // 三すくみ: 皇帝 > 市民 > 奴隷 > 皇帝
-// p1 = 皇帝側, p2 = 奴隷側
+// p1sideに応じてeCard/sCardを正規化して判定
 function getResult(p1c, p2c) {
-  if (p1c === 'emperor' && p2c === 'citizen') return 'p1'; // 皇帝 > 市民
-  if (p1c === 'citizen' && p2c === 'slave')   return 'p1'; // 市民 > 奴隷
-  if (p1c === 'emperor' && p2c === 'slave')   return 'p2'; // 奴隷 > 皇帝
-  return 'draw'; // 市民 vs 市民
+  const p1isEmp = gs.p1side === 'emperor';
+  const eCard   = p1isEmp ? p1c : p2c;
+  const sCard   = p1isEmp ? p2c : p1c;
+  const empWins = () => p1isEmp ? 'p1' : 'p2';
+  const slvWins = () => p1isEmp ? 'p2' : 'p1';
+
+  if (eCard === 'emperor' && sCard === 'citizen') return empWins(); // 皇帝 > 市民
+  if (eCard === 'citizen' && sCard === 'slave')   return empWins(); // 市民 > 奴隷
+  if (eCard === 'emperor' && sCard === 'slave')   return slvWins(); // 奴隷 > 皇帝
+  return 'draw';
 }
 function send(msg) {
   if (conn && conn.open) conn.send(msg);
@@ -550,11 +616,55 @@ function onPlayAgain() {
 function render() {
   if (!gs) return;
   switch (gs.status) {
-    case 'playing':   renderGame();     break;
-    case 'revealing': renderReveal();   break;
-    case 'gameover':  renderGameOver(); break;
+    case 'roleSelect': renderRoleSelect(); break;
+    case 'playing':    renderGame();       break;
+    case 'revealing':  renderReveal();     break;
+    case 'gameover':   renderGameOver();   break;
   }
 }
+
+// ── 役選択画面 ──
+function renderRoleSelect() {
+  showScreen('roleselect');
+  const isP1    = myRole === 'p1';
+  const p1side  = gs.p1side || 'emperor';
+  const mySide  = isP1 ? p1side : (p1side === 'emperor' ? 'slave' : 'emperor');
+
+  // カードのハイライト（P1の選択を反映）
+  document.getElementById('role-card-emperor').classList.toggle('chosen',
+    (isP1 && p1side === 'emperor') || (!isP1 && p1side === 'slave'));
+  document.getElementById('role-card-slave').classList.toggle('chosen',
+    (isP1 && p1side === 'slave')   || (!isP1 && p1side === 'emperor'));
+
+  // P2はカードをタップ不可
+  document.getElementById('role-card-emperor').classList.toggle('disabled-card', !isP1);
+  document.getElementById('role-card-slave').classList.toggle('disabled-card',   !isP1);
+
+  const statusEl  = document.getElementById('role-status-msg');
+  const confirmEl = document.getElementById('role-confirm-btn');
+
+  if (isP1) {
+    statusEl.textContent = `あなたの役: ${p1side === 'emperor' ? '👑 皇帝側' : '⛓️ 奴隷側'}`;
+    confirmEl.style.display = 'block';
+  } else {
+    statusEl.textContent = `あなたの役: ${mySide === 'emperor' ? '👑 皇帝側' : '⛓️ 奴隷側'}（ホストが決定します）`;
+    confirmEl.style.display = 'none';
+  }
+}
+
+window.pickRole = function(side) {
+  if (myRole !== 'p1' || !gs) return;
+  gs.p1side = side;
+  broadcastState();
+  render();
+};
+
+window.confirmRoles = function() {
+  if (myRole !== 'p1' || !gs) return;
+  startGameWithRoles();
+  broadcastState();
+  render();
+};
 
 // ── ゲーム画面 ──
 function renderGame() {
@@ -565,11 +675,17 @@ function renderGame() {
   const myCard = isP1 ? gs.p1card : gs.p2card;
   const opCard = isP1 ? gs.p2card : gs.p1card;
 
-  document.getElementById('game-role-badge').innerHTML =
-    `<span class="role-badge ${isP1 ? 'badge-emperor' : 'badge-slave'}">${isP1 ? '👑 皇帝側' : '⛓️ 奴隷側'}</span>`;
+  const mySide  = isP1 ? gs.p1side : (gs.p1side === 'emperor' ? 'slave' : 'emperor');
+  const p1Label = gs.p1side === 'emperor' ? '皇帝側' : '奴隷側';
+  const p2Label = gs.p1side === 'emperor' ? '奴隷側' : '皇帝側';
 
-  document.getElementById('score-p1-name').textContent = isP1  ? '皇帝側（あなた）' : '皇帝側（相手）';
-  document.getElementById('score-p2-name').textContent = !isP1 ? '奴隷側（あなた）' : '奴隷側（相手）';
+  document.getElementById('game-role-badge').innerHTML =
+    `<span class="role-badge ${mySide === 'emperor' ? 'badge-emperor' : 'badge-slave'}">${mySide === 'emperor' ? '👑 皇帝側' : '⛓️ 奴隷側'}</span>`;
+
+  document.getElementById('score-p1-name').textContent = p1Label + (isP1  ? '（あなた）' : '（相手）');
+  document.getElementById('score-p2-name').textContent = p2Label + (!isP1 ? '（あなた）' : '（相手）');
+  document.getElementById('score-p1-num').className    = `score-num ${gs.p1side === 'emperor' ? 'num-gold' : 'num-blue'}`;
+  document.getElementById('score-p2-num').className    = `score-num ${gs.p1side === 'emperor' ? 'num-blue' : 'num-gold'}`;
   document.getElementById('score-p1-num').textContent  = gs.score.p1;
   document.getElementById('score-p2-num').textContent  = gs.score.p2;
   const round = gs.round || 1;
@@ -624,8 +740,10 @@ function renderReveal() {
   const myWin  = (isP1 && result === 'p1') || (!isP1 && result === 'p2');
   const isDraw = result === 'draw';
 
-  document.getElementById('reveal-p1-name').textContent = isP1  ? '皇帝側（あなた）' : '皇帝側（相手）';
-  document.getElementById('reveal-p2-name').textContent = !isP1 ? '奴隷側（あなた）' : '奴隷側（相手）';
+  const p1Label = gs.p1side === 'emperor' ? '皇帝側' : '奴隷側';
+  const p2Label = gs.p1side === 'emperor' ? '奴隷側' : '皇帝側';
+  document.getElementById('reveal-p1-name').textContent = p1Label + (isP1  ? '（あなた）' : '（相手）');
+  document.getElementById('reveal-p2-name').textContent = p2Label + (!isP1 ? '（あなた）' : '（相手）');
 
   applyCard('reveal-p1-card', gs.p1card, true);
   applyCard('reveal-p2-card', gs.p2card, true);
@@ -655,11 +773,13 @@ function renderGameOver() {
   const txt = document.getElementById('go-text');
   txt.textContent = isDraw ? '引き分け' : myWin ? '勝利！' : '敗北…';
   txt.style.color = isDraw ? 'var(--muted)' : myWin ? 'var(--green)' : 'var(--red)';
+  const p1Label = gs.p1side === 'emperor' ? '皇帝側' : '奴隷側';
+  const p2Label = gs.p1side === 'emperor' ? '奴隷側' : '皇帝側';
   document.getElementById('go-score').textContent =
-    `皇帝側 ${gs.score.p1} ー ${gs.score.p2} 奴隷側`;
+    `${p1Label} ${gs.score.p1} ー ${gs.score.p2} ${p2Label}`;
 
   const btn = document.getElementById('again-btn');
-  btn.textContent = 'もう一度';
+  btn.textContent = 'もう一度（役選択へ）';
   btn.disabled    = false;
 }
 
