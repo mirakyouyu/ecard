@@ -192,11 +192,13 @@
       各5枚 ｜ 5ラウンド制・勝ち数の多い方が勝ち
     </div>
     <button class="btn btn-gold" onclick="createRoom()">部屋を作る（ホスト）</button>
-    <button class="btn btn-dark" id="join-toggle-btn" onclick="showJoinSection()">部屋に入る（ゲスト）</button>
+    <button class="btn btn-dark" id="join-toggle-btn" onclick="showJoinSection('player')">部屋に入る（ゲスト）</button>
+    <button class="btn btn-dark" id="spectate-toggle-btn" onclick="showJoinSection('spectator')">👁️ 観戦する</button>
     <div id="join-section" style="display:none;">
+      <div id="join-mode-label" style="text-align:center; font-size:13px; color:var(--muted); margin:8px 0;"></div>
       <input class="code-input" id="join-input" type="tel" placeholder="0000" maxlength="4"
              oninput="this.value=this.value.replace(/\D/g,'')">
-      <button class="btn btn-gold" onclick="joinRoom()">入る</button>
+      <button class="btn btn-gold" id="join-confirm-btn" onclick="joinConfirm()">入る</button>
       <button class="btn btn-dark" onclick="hideJoinSection()">キャンセル</button>
     </div>
     <div class="spacer"></div>
@@ -337,10 +339,12 @@ const CARD = {
 // ══════════════════════════════════════════════
 //  状態
 // ══════════════════════════════════════════════
-let peer     = null;
-let conn     = null;
-let myRole   = null;   // 'p1' | 'p2'
-let selIdx   = null;
+let peer       = null;
+let conn       = null;
+let spectators = [];   // 観戦者の接続一覧（P1のみ使用）
+let myRole     = null; // 'p1' | 'p2' | 'spectator'
+let selIdx     = null;
+let joinMode   = 'player'; // 'player' | 'spectator'
 
 // ゲーム状態（P1が管理、P2はコピーを受け取るだけ）
 let gs = null;
@@ -406,19 +410,32 @@ function send(msg) {
 // ══════════════════════════════════════════════
 //  ホーム
 // ══════════════════════════════════════════════
-function showJoinSection() {
+function showJoinSection(mode) {
+  joinMode = mode || 'player';
   document.getElementById('join-section').style.display = 'block';
   document.getElementById('join-toggle-btn').style.display = 'none';
+  document.getElementById('spectate-toggle-btn').style.display = 'none';
+  document.getElementById('join-mode-label').textContent =
+    joinMode === 'spectator' ? '👁️ 観戦モード：ルームコードを入力' : '対戦モード：ルームコードを入力';
+  document.getElementById('join-confirm-btn').textContent =
+    joinMode === 'spectator' ? '観戦する' : '入る';
 }
 function hideJoinSection() {
   document.getElementById('join-section').style.display = 'none';
   document.getElementById('join-toggle-btn').style.display = 'block';
+  document.getElementById('spectate-toggle-btn').style.display = 'block';
+}
+function joinConfirm() {
+  if (joinMode === 'spectator') joinAsSpectator();
+  else joinRoom();
 }
 
 function goHome() {
-  if (conn)  { conn.close();  conn  = null; }
+  if (conn)  { try { conn.close(); } catch(e) {} conn = null; }
+  spectators.forEach(s => { try { s.close(); } catch(e) {} });
+  spectators = [];
   if (peer)  { peer.destroy(); peer = null; }
-  myRole = null; selIdx = null; gs = null;
+  myRole = null; selIdx = null; gs = null; joinMode = 'player';
   showScreen('home');
 }
 
@@ -446,19 +463,40 @@ function createRoom() {
   });
 
   peer.on('connection', (c) => {
-    conn = c;
-    conn.on('data', (msg) => {
-      if (msg.type === 'hello') {
-        // P2 の準備完了 → ゲーム開始
-        gs = freshState();
-        selIdx = null;
-        broadcastState();
-        render();
+    let cRole = null; // 'player' | 'spectator'
+
+    c.on('data', (msg) => {
+      if (!cRole) {
+        // 最初のメッセージで役割を決定
+        if (msg.type === 'hello') {
+          if (conn && conn.open) {
+            // 対戦者は既に接続中 → 弾く
+            c.send({ type: 'error', message: '満員です。観戦としてなら入れます。' });
+            return;
+          }
+          cRole = 'player';
+          conn = c;
+          c.on('close', () => toast('相手が切断しました'));
+          gs = freshState();
+          selIdx = null;
+          broadcastState();
+          render();
+        } else if (msg.type === 'hello-spectator') {
+          cRole = 'spectator';
+          spectators.push(c);
+          c.on('close', () => {
+            spectators = spectators.filter(s => s !== c);
+          });
+          // 現在の状態をすぐ送信
+          if (gs) c.send({ type: 'state', data: gs });
+          toast(`👁️ 観戦者が入室（${spectators.length}人）`);
+        }
         return;
       }
-      onP2Message(msg);
+      // 2回目以降
+      if (cRole === 'player') onP2Message(msg);
+      // spectator からのメッセージは無視
     });
-    conn.on('close', () => toast('相手が切断しました'));
   });
 
   peer.on('error', (err) => {
@@ -503,6 +541,41 @@ function joinRoom() {
 }
 
 // ══════════════════════════════════════════════
+//  観戦として入る
+// ══════════════════════════════════════════════
+function joinAsSpectator() {
+  const code = document.getElementById('join-input').value.trim();
+  if (code.length !== 4) { toast('4桁のコードを入力してください'); return; }
+
+  myRole = 'spectator';
+
+  peer = new Peer();
+  peer.on('open', () => {
+    conn = peer.connect(code, { reliable: true, serialization: 'json' });
+
+    conn.on('open', () => {
+      document.getElementById('lobby-code').textContent = code;
+      document.getElementById('lobby-status').textContent = '観戦者として接続しました！';
+      showScreen('lobby');
+      conn.send({ type: 'hello-spectator' });
+    });
+    conn.on('data', (msg) => {
+      if (msg.type === 'state') {
+        gs = msg.data;
+        render();
+      } else if (msg.type === 'error') {
+        toast(msg.message || '接続できませんでした');
+        goHome();
+      }
+    });
+    conn.on('close', () => { toast('ホストが切断しました'); goHome(); });
+    conn.on('error', () => toast('接続に失敗しました'));
+  });
+
+  peer.on('error', () => toast('部屋が見つかりません'));
+}
+
+// ══════════════════════════════════════════════
 //  メッセージ受信
 // ══════════════════════════════════════════════
 
@@ -541,6 +614,7 @@ function onP2Message(msg) {
 // ══════════════════════════════════════════════
 function broadcastState() {
   send({ type: 'state', data: gs });
+  spectators.forEach(s => { if (s && s.open) s.send({ type: 'state', data: gs }); });
 }
 
 function checkBothReady() {
@@ -630,9 +704,10 @@ function render() {
 // ── 役選択画面 ──
 function renderRoleSelect() {
   showScreen('roleselect');
-  const isP1    = myRole === 'p1';
-  const p1side  = gs.p1side || 'emperor';
-  const mySide  = isP1 ? p1side : (p1side === 'emperor' ? 'slave' : 'emperor');
+  const isP1       = myRole === 'p1';
+  const isSpectator = myRole === 'spectator';
+  const p1side     = gs.p1side || 'emperor';
+  const mySide     = isP1 ? p1side : (p1side === 'emperor' ? 'slave' : 'emperor');
 
   // カードのハイライト（P1の選択を反映）
   document.getElementById('role-card-emperor').classList.toggle('chosen',
@@ -640,14 +715,17 @@ function renderRoleSelect() {
   document.getElementById('role-card-slave').classList.toggle('chosen',
     (isP1 && p1side === 'slave')   || (!isP1 && p1side === 'emperor'));
 
-  // P2はカードをタップ不可
+  // P2・観戦者はカードをタップ不可
   document.getElementById('role-card-emperor').classList.toggle('disabled-card', !isP1);
   document.getElementById('role-card-slave').classList.toggle('disabled-card',   !isP1);
 
   const statusEl  = document.getElementById('role-status-msg');
   const confirmEl = document.getElementById('role-confirm-btn');
 
-  if (isP1) {
+  if (isSpectator) {
+    statusEl.textContent = '👁️ 観戦中 — ホストが役を選んでいます…';
+    confirmEl.style.display = 'none';
+  } else if (isP1) {
     statusEl.textContent = `あなたの役: ${p1side === 'emperor' ? '👑 皇帝側' : '⛓️ 奴隷側'}`;
     confirmEl.style.display = 'block';
   } else {
@@ -673,7 +751,8 @@ window.confirmRoles = function() {
 // ── ゲーム画面 ──
 function renderGame() {
   showScreen('game');
-  const isP1   = myRole === 'p1';
+  const isP1        = myRole === 'p1';
+  const isSpectator = myRole === 'spectator';
   const myHand = isP1 ? gs.p1hand : gs.p2hand;
   const opHand = isP1 ? gs.p2hand : gs.p1hand;
   const myCard = isP1 ? gs.p1card : gs.p2card;
@@ -683,11 +762,16 @@ function renderGame() {
   const p1Label = gs.p1side === 'emperor' ? '皇帝側' : '奴隷側';
   const p2Label = gs.p1side === 'emperor' ? '奴隷側' : '皇帝側';
 
-  document.getElementById('game-role-badge').innerHTML =
-    `<span class="role-badge ${mySide === 'emperor' ? 'badge-emperor' : 'badge-slave'}">${mySide === 'emperor' ? '👑 皇帝側' : '⛓️ 奴隷側'}</span>`;
+  if (isSpectator) {
+    document.getElementById('game-role-badge').innerHTML =
+      `<span class="role-badge" style="background:rgba(100,200,255,0.1);color:#7cf;border:1px solid rgba(100,200,255,0.3);">👁️ 観戦中</span>`;
+  } else {
+    document.getElementById('game-role-badge').innerHTML =
+      `<span class="role-badge ${mySide === 'emperor' ? 'badge-emperor' : 'badge-slave'}">${mySide === 'emperor' ? '👑 皇帝側' : '⛓️ 奴隷側'}</span>`;
+  }
 
-  document.getElementById('score-p1-name').textContent = p1Label + (isP1  ? '（あなた）' : '（相手）');
-  document.getElementById('score-p2-name').textContent = p2Label + (!isP1 ? '（あなた）' : '（相手）');
+  document.getElementById('score-p1-name').textContent = p1Label + (isSpectator ? '' : isP1  ? '（あなた）' : '（相手）');
+  document.getElementById('score-p2-name').textContent = p2Label + (isSpectator ? '' : !isP1 ? '（あなた）' : '（相手）');
   document.getElementById('score-p1-num').className    = `score-num ${gs.p1side === 'emperor' ? 'num-gold' : 'num-blue'}`;
   document.getElementById('score-p2-num').className    = `score-num ${gs.p1side === 'emperor' ? 'num-blue' : 'num-gold'}`;
   document.getElementById('score-p1-num').textContent  = gs.score.p1;
@@ -696,9 +780,52 @@ function renderGame() {
   document.getElementById('round-counter').innerHTML   = `${round}/<br>${TOTAL_ROUNDS}R`;
 
   const msg = document.getElementById('game-status-msg');
-  if (myCard && !opCard)  msg.textContent = '相手のカードを待っています…';
-  else if (!myCard)        msg.textContent = 'カードを選んでください';
-  else                     msg.textContent = '両者のカードが揃いました';
+  if (isSpectator) {
+    const p1Played = !!gs.p1card, p2Played = !!gs.p2card;
+    if (!p1Played && !p2Played)  msg.textContent = '両者がカードを選んでいます…';
+    else if (p1Played && !p2Played) msg.textContent = `${p1Label}がカードを出しました`;
+    else if (!p1Played && p2Played) msg.textContent = `${p2Label}がカードを出しました`;
+    else                            msg.textContent = '両者のカードが揃いました';
+  } else {
+    if (myCard && !opCard)  msg.textContent = '相手のカードを待っています…';
+    else if (!myCard)        msg.textContent = 'カードを選んでください';
+    else                     msg.textContent = '両者のカードが揃いました';
+  }
+
+  if (isSpectator) {
+    // 観戦者: 両手札とも裏向き
+    const oppEl = document.getElementById('opp-hand');
+    oppEl.innerHTML = `<div class="area-label" style="font-size:10px;margin-right:4px;">${p1Label}</div>`;
+    gs.p1hand.forEach(() => {
+      const el = document.createElement('div');
+      el.className = 'card card-back disabled';
+      if (gs.p1card) { el.style.borderColor = '#555'; el.style.transform = 'translateY(-6px)'; }
+      el.innerHTML = `<div class="card-symbol" style="font-size:22px;color:#2d4a35;">🂠</div>`;
+      oppEl.appendChild(el);
+    });
+    document.getElementById('opp-submitted-msg').style.display = gs.p1card ? 'block' : 'none';
+
+    const myEl = document.getElementById('my-hand');
+    myEl.innerHTML = `<div class="area-label" style="font-size:10px;margin-right:4px;">${p2Label}</div>`;
+    gs.p2hand.forEach(() => {
+      const el = document.createElement('div');
+      el.className = 'card card-back disabled';
+      if (gs.p2card) { el.style.borderColor = '#555'; el.style.transform = 'translateY(-6px)'; }
+      el.innerHTML = `<div class="card-symbol" style="font-size:22px;color:#2d4a35;">🂠</div>`;
+      myEl.appendChild(el);
+    });
+
+    document.getElementById('submit-btn').style.display = 'none';
+    // areaラベルを隠す（観戦者は独自ラベルを手札内に入れた）
+    document.querySelector('.opp-area .area-label').style.display = 'none';
+    document.querySelector('#screen-game > div:last-of-type .area-label').style.display = 'none';
+    return;
+  }
+
+  // 通常プレイヤー表示
+  document.querySelector('.opp-area .area-label').style.display = '';
+  document.querySelector('#screen-game > div:last-of-type .area-label') &&
+    (document.querySelector('#screen-game > div:last-of-type .area-label').style.display = '');
 
   // 相手の手札（裏向き）
   const oppEl = document.getElementById('opp-hand');
@@ -739,15 +866,16 @@ function renderReveal() {
   showScreen('reveal');
   if (!gs.p1card || !gs.p2card) return;
 
-  const isP1   = myRole === 'p1';
-  const result = getResult(gs.p1card, gs.p2card);
-  const myWin  = (isP1 && result === 'p1') || (!isP1 && result === 'p2');
-  const isDraw = result === 'draw';
+  const isP1        = myRole === 'p1';
+  const isSpectator = myRole === 'spectator';
+  const result      = getResult(gs.p1card, gs.p2card);
+  const isDraw      = result === 'draw';
+  const myWin       = !isSpectator && ((isP1 && result === 'p1') || (!isP1 && result === 'p2'));
 
   const p1Label = gs.p1side === 'emperor' ? '皇帝側' : '奴隷側';
   const p2Label = gs.p1side === 'emperor' ? '奴隷側' : '皇帝側';
-  document.getElementById('reveal-p1-name').textContent = p1Label + (isP1  ? '（あなた）' : '（相手）');
-  document.getElementById('reveal-p2-name').textContent = p2Label + (!isP1 ? '（あなた）' : '（相手）');
+  document.getElementById('reveal-p1-name').textContent = p1Label + (isSpectator ? '' : isP1  ? '（あなた）' : '（相手）');
+  document.getElementById('reveal-p2-name').textContent = p2Label + (isSpectator ? '' : !isP1 ? '（あなた）' : '（相手）');
 
   applyCard('reveal-p1-card', gs.p1card, true);
   applyCard('reveal-p2-card', gs.p2card, true);
@@ -757,9 +885,18 @@ function renderReveal() {
   clearTimeout(resEl._t);
   resEl._t = setTimeout(() => {
     resEl.style.opacity = '1';
-    resEl.className = 'result-label pop-in ' +
-      (isDraw ? 'result-draw' : myWin ? 'result-win' : 'result-lose');
-    resEl.textContent = isDraw ? '引き分け' : myWin ? '勝利！' : '敗北…';
+    let resText, resCls;
+    if (isDraw) {
+      resCls = 'result-draw'; resText = '引き分け';
+    } else if (isSpectator) {
+      resCls = 'result-win';
+      resText = (result === 'p1' ? p1Label : p2Label) + ' 勝ち！';
+    } else {
+      resCls = myWin ? 'result-win' : 'result-lose';
+      resText = myWin ? '勝利！' : '敗北…';
+    }
+    resEl.className = `result-label pop-in ${resCls}`;
+    resEl.textContent = resText;
   }, 500);
 
   document.getElementById('reveal-next-msg').textContent = isDraw ? '次のラウンドへ…' : '勝負決定！';
@@ -768,23 +905,36 @@ function renderReveal() {
 // ── ゲームオーバー画面 ──
 function renderGameOver() {
   showScreen('gameover');
-  const isP1   = myRole === 'p1';
-  const w      = gs.winner;
-  const myWin  = (isP1 && w === 'p1') || (!isP1 && w === 'p2');
-  const isDraw = w === 'draw';
+  const isP1        = myRole === 'p1';
+  const isSpectator = myRole === 'spectator';
+  const w           = gs.winner;
+  const isDraw      = w === 'draw';
+  const myWin       = !isSpectator && ((isP1 && w === 'p1') || (!isP1 && w === 'p2'));
 
-  document.getElementById('go-emoji').textContent = isDraw ? '🤝' : myWin ? '🎉' : '💀';
-  const txt = document.getElementById('go-text');
-  txt.textContent = isDraw ? '引き分け' : myWin ? '勝利！' : '敗北…';
-  txt.style.color = isDraw ? 'var(--muted)' : myWin ? 'var(--green)' : 'var(--red)';
   const p1Label = gs.p1side === 'emperor' ? '皇帝側' : '奴隷側';
   const p2Label = gs.p1side === 'emperor' ? '奴隷側' : '皇帝側';
+
+  const txt = document.getElementById('go-text');
+  if (isSpectator) {
+    document.getElementById('go-emoji').textContent = isDraw ? '🤝' : '🏆';
+    txt.textContent = isDraw ? '引き分け' : (w === 'p1' ? p1Label : p2Label) + ' の勝ち！';
+    txt.style.color = isDraw ? 'var(--muted)' : 'var(--gold)';
+  } else {
+    document.getElementById('go-emoji').textContent = isDraw ? '🤝' : myWin ? '🎉' : '💀';
+    txt.textContent = isDraw ? '引き分け' : myWin ? '勝利！' : '敗北…';
+    txt.style.color = isDraw ? 'var(--muted)' : myWin ? 'var(--green)' : 'var(--red)';
+  }
   document.getElementById('go-score').textContent =
     `${p1Label} ${gs.score.p1} ー ${gs.score.p2} ${p2Label}`;
 
   const btn = document.getElementById('again-btn');
-  btn.textContent = 'もう一度（役選択へ）';
-  btn.disabled    = false;
+  if (isSpectator) {
+    btn.style.display = 'none';
+  } else {
+    btn.style.display = 'block';
+    btn.textContent = 'もう一度（役選択へ）';
+    btn.disabled    = false;
+  }
 }
 
 function applyCard(elId, type, large) {
