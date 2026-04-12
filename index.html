@@ -582,8 +582,14 @@ function joinAsSpectator() {
 // P1 → P2 へのメッセージを P2 が受け取る
 function onP1Message(msg) {
   if (msg.type === 'state') {
+    const prevRound  = gs ? gs.round  : null;
+    const prevStatus = gs ? gs.status : null;
     gs = msg.data;
-    selIdx = null;
+    // ラウンドが変わった時 or playing でなくなった時だけ selIdx をリセット
+    // （P1がカードを出して状態が届いても P2 の選択はキープ）
+    if (gs.round !== prevRound || gs.status !== 'playing') {
+      selIdx = null;
+    }
     render();
   }
 }
